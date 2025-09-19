@@ -27,8 +27,8 @@ export async function createClient() {
   })
 }
 
-export function createServerClient(supabaseUrl?: string, supabaseKey?: string, options?: any) {
-  const cookieStore = cookies()
+export async function createServerClient(supabaseUrl?: string, supabaseKey?: string, options?: any) {
+  const cookieStore = await cookies()
 
   return createSupabaseServerClient(
     supabaseUrl || process.env.NEXT_PUBLIC_SUPABASE_URL!,

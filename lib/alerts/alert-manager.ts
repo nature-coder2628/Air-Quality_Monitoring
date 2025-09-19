@@ -2,13 +2,16 @@ import { createServerClient } from "@/lib/supabase/server"
 import { type Alert, AlertType, AlertSeverity } from "@/lib/types/air-quality"
 
 export class AlertManager {
-  private supabase = createServerClient()
+  private async getSupabase() {
+    return await createServerClient()
+  }
 
   async checkAndCreateAlerts(): Promise<Alert[]> {
     const alerts: Alert[] = []
+    const supabase = await this.getSupabase()
 
     // Get latest readings for all areas
-    const { data: readings } = await this.supabase
+    const { data: readings } = await supabase
       .from("air_quality_readings")
       .select(`
         *,
@@ -35,7 +38,7 @@ export class AlertManager {
 
     // Save alerts to database
     if (alerts.length > 0) {
-      await this.supabase.from("alerts").insert(
+      await supabase.from("alerts").insert(
         alerts.map((alert) => ({
           area_id: alert.areaId,
           type: alert.type,
@@ -156,7 +159,8 @@ export class AlertManager {
   }
 
   async getActiveAlerts(areaId?: string): Promise<Alert[]> {
-    let query = this.supabase
+    const supabase = await this.getSupabase()
+    let query = supabase
       .from("alerts")
       .select(`
         *,
@@ -189,7 +193,8 @@ export class AlertManager {
   }
 
   async dismissAlert(alertId: string): Promise<void> {
-    await this.supabase.from("alerts").update({ is_active: false }).eq("id", alertId)
+    const supabase = await this.getSupabase()
+    await supabase.from("alerts").update({ is_active: false }).eq("id", alertId)
   }
 
   async getAlertStats(): Promise<{
@@ -197,7 +202,8 @@ export class AlertManager {
     bySeverity: Record<AlertSeverity, number>
     byType: Record<AlertType, number>
   }> {
-    const { data } = await this.supabase.from("alerts").select("severity, type").eq("is_active", true)
+    const supabase = await this.getSupabase()
+    const { data } = await supabase.from("alerts").select("severity, type").eq("is_active", true)
 
     const stats = {
       total: data?.length || 0,

@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { airQualityPredictor } from "@/lib/ml/air-quality-predictor"
+import { advancedMLEngine } from "@/lib/ml/advanced-ml-engine"
+import { realTimeMonitoring } from "@/lib/ml/real-time-monitoring"
 
 export async function POST(request: NextRequest) {
   try {
@@ -50,15 +52,55 @@ export async function POST(request: NextRequest) {
       wind_direction: latestReading.wind_direction,
     }
 
-    console.log(`[v0] Generating predictions for ${area.name} (${hoursAhead} hours ahead)`)
+    console.log(`[Advanced ML] Generating predictions for ${area.name} (${hoursAhead} hours ahead)`)
 
-    // Generate predictions
-    const predictions = await airQualityPredictor.generatePredictions(
-      historicalData,
-      weatherData,
-      area,
-      Math.min(hoursAhead, 48), // Limit to 48 hours
-    )
+    const startTime = Date.now()
+    let predictions
+    let aiInsights: string | undefined
+    let modelPerformance
+    let riskFactors: string[] = []
+
+    try {
+      // Use advanced ML engine for enhanced predictions
+      const result = await advancedMLEngine.generateAdvancedPredictions(
+        historicalData,
+        weatherData,
+        area,
+        Math.min(hoursAhead, 72), // Extended to 72 hours with advanced system
+        true // Include AI insights
+      )
+      
+      predictions = result.predictions
+      aiInsights = result.aiInsights
+      modelPerformance = result.modelPerformance
+      riskFactors = result.riskFactors
+      
+      // Track prediction performance
+      realTimeMonitoring.trackPrediction(startTime, Date.now(), true, {
+        areaId,
+        areaName: area.name,
+        hoursAhead,
+        modelVersion: result.modelPerformance.modelVersion,
+        accuracy: result.modelPerformance.accuracy
+      })
+      
+    } catch (error) {
+      // Fallback to base predictor if advanced system fails
+      console.warn('Advanced ML failed, falling back to base predictor:', error)
+      
+      predictions = await airQualityPredictor.generatePredictions(
+        historicalData,
+        weatherData,
+        area,
+        Math.min(hoursAhead, 48)
+      )
+      
+      realTimeMonitoring.trackPrediction(startTime, Date.now(), false, {
+        areaId,
+        areaName: area.name,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      })
+    }
 
     // Store predictions in database
     const predictionRecords = predictions.map((prediction) => ({
@@ -90,9 +132,9 @@ export async function POST(request: NextRequest) {
       throw new Error(`Failed to store predictions: ${insertError.message}`)
     }
 
-    console.log(`[v0] Successfully generated and stored ${predictions.length} predictions for ${area.name}`)
+    console.log(`[Advanced ML] Successfully generated and stored ${predictions.length} predictions for ${area.name}`)
 
-    return NextResponse.json({
+    const response = {
       success: true,
       area: area.name,
       predictions_generated: predictions.length,
@@ -103,9 +145,31 @@ export async function POST(request: NextRequest) {
         max: Math.max(...predictions.map((p) => p.confidence_score)),
         avg: predictions.reduce((sum, p) => sum + p.confidence_score, 0) / predictions.length,
       },
-    })
+      // Advanced ML features
+      ai_insights: aiInsights,
+      model_performance: modelPerformance ? {
+        accuracy: modelPerformance.accuracy,
+        confidence_calibration: modelPerformance.confidenceCalibration,
+        prediction_latency: modelPerformance.predictionLatency,
+        drift_score: modelPerformance.driftScore
+      } : undefined,
+      risk_factors: riskFactors,
+      enhanced_features: {
+        ai_powered: !!aiInsights,
+        real_time_monitoring: true,
+        drift_detection: true,
+        performance_tracking: true
+      }
+    }
+
+    return NextResponse.json(response)
   } catch (error) {
-    console.error("[v0] Prediction generation error:", error)
+    console.error("[Advanced ML] Prediction generation error:", error)
+    
+    // Track failed prediction
+    realTimeMonitoring.trackPrediction(Date.now() - 1000, Date.now(), false, {
+      error: error instanceof Error ? error.message : 'Unknown error'
+    })
     return NextResponse.json(
       {
         error: "Failed to generate predictions",

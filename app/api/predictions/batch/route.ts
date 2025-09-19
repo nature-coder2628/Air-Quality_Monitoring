@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { airQualityPredictor } from "@/lib/ml/air-quality-predictor"
+import { advancedMLEngine } from "@/lib/ml/advanced-ml-engine"
+import { realTimeMonitoring } from "@/lib/ml/real-time-monitoring"
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,7 +19,11 @@ export async function POST(request: NextRequest) {
     const results = []
     const errors = []
 
-    console.log(`[v0] Starting batch prediction generation for ${areas.length} areas`)
+    console.log(`[Advanced ML Batch] Starting batch prediction generation for ${areas.length} areas`)
+    
+    const batchStartTime = Date.now()
+    let totalPredictions = 0
+    let aiEnhancedCount = 0
 
     // Generate predictions for each area
     for (const area of areas) {
@@ -45,13 +51,57 @@ export async function POST(request: NextRequest) {
           wind_direction: latestReading.wind_direction,
         }
 
-        // Generate predictions
-        const predictions = await airQualityPredictor.generatePredictions(
-          historicalData,
-          weatherData,
-          area,
-          Math.min(hoursAhead, 48),
-        )
+        // Generate advanced predictions
+        const predictionStartTime = Date.now()
+        let predictions
+        let aiInsights: string | undefined
+        let isAiEnhanced = false
+        
+        try {
+          // Use advanced ML engine for enhanced predictions
+          const result = await advancedMLEngine.generateAdvancedPredictions(
+            historicalData,
+            weatherData,
+            area,
+            Math.min(hoursAhead, 72),
+            true // Include AI insights for batch processing
+          )
+          
+          predictions = result.predictions
+          aiInsights = result.aiInsights
+          isAiEnhanced = true
+          aiEnhancedCount++
+          
+          // Track successful prediction
+          realTimeMonitoring.trackPrediction(predictionStartTime, Date.now(), true, {
+            areaId: area.id,
+            areaName: area.name,
+            batchProcessing: true,
+            aiEnhanced: true,
+            modelVersion: result.modelPerformance.modelVersion
+          })
+          
+        } catch (error) {
+          // Fallback to base predictor
+          console.warn(`Advanced ML failed for ${area.name}, using fallback:`, error)
+          
+          predictions = await airQualityPredictor.generatePredictions(
+            historicalData,
+            weatherData,
+            area,
+            Math.min(hoursAhead, 48)
+          )
+          
+          realTimeMonitoring.trackPrediction(predictionStartTime, Date.now(), true, {
+            areaId: area.id,
+            areaName: area.name,
+            batchProcessing: true,
+            aiEnhanced: false,
+            fallbackUsed: true
+          })
+        }
+        
+        totalPredictions += predictions.length
 
         // Prepare prediction records
         const predictionRecords = predictions.map((prediction) => ({
@@ -85,19 +135,42 @@ export async function POST(request: NextRequest) {
           area: area.name,
           predictions_generated: predictions.length,
           avg_confidence: predictions.reduce((sum, p) => sum + p.confidence_score, 0) / predictions.length,
+          ai_enhanced: isAiEnhanced,
+          ai_insights: aiInsights ? aiInsights.slice(0, 200) + '...' : undefined,
           status: "success",
         })
 
-        console.log(`[v0] Generated predictions for ${area.name}`)
+        console.log(`[Advanced ML Batch] Generated ${predictions.length} predictions for ${area.name} (AI: ${isAiEnhanced})`)
 
         // Add delay to prevent overwhelming the system
         await new Promise((resolve) => setTimeout(resolve, 100))
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Unknown error"
         errors.push(`${area.name}: ${errorMessage}`)
-        console.error(`[v0] Error generating predictions for ${area.name}:`, error)
+        console.error(`[Advanced ML Batch] Error generating predictions for ${area.name}:`, error)
+        
+        // Track failed prediction
+        realTimeMonitoring.trackPrediction(Date.now() - 1000, Date.now(), false, {
+          areaId: area.id,
+          areaName: area.name,
+          batchProcessing: true,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        })
       }
     }
+
+    const batchDuration = Date.now() - batchStartTime
+    
+    // Log batch completion
+    realTimeMonitoring.logEvent('prediction', 'info', 
+      `Batch prediction completed: ${results.length}/${areas.length} areas successful`, 
+      {
+        duration: batchDuration,
+        totalPredictions,
+        aiEnhancedCount,
+        successRate: (results.length / areas.length) * 100
+      }
+    )
 
     return NextResponse.json({
       success: true,
@@ -108,11 +181,27 @@ export async function POST(request: NextRequest) {
       summary: {
         successful_areas: results.length,
         failed_areas: errors.length,
+        total_predictions_generated: totalPredictions,
+        ai_enhanced_areas: aiEnhancedCount,
+        ai_enhancement_rate: areas.length > 0 ? (aiEnhancedCount / areas.length) * 100 : 0,
         avg_confidence: results.length > 0 ? results.reduce((sum, r) => sum + r.avg_confidence, 0) / results.length : 0,
+        batch_duration_ms: batchDuration
       },
+      advanced_features: {
+        ai_powered_predictions: aiEnhancedCount > 0,
+        real_time_monitoring: true,
+        performance_tracking: true,
+        fallback_protection: true
+      }
     })
   } catch (error) {
-    console.error("[v0] Batch prediction error:", error)
+    console.error("[Advanced ML Batch] Batch prediction error:", error)
+    
+    // Log batch failure
+    realTimeMonitoring.logEvent('prediction', 'error', 
+      'Batch prediction failed', 
+      { error: error instanceof Error ? error.message : 'Unknown error' }
+    )
     return NextResponse.json(
       {
         error: "Failed to generate batch predictions",

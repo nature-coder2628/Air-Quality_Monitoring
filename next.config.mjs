@@ -13,9 +13,19 @@ const nextConfig = {
   async rewrites() {
     return []
   },
-  // Allow all hosts for Replit iframe proxy
-  experimental: {
-    allowedHosts: ['*'],
+  // Configure headers for Replit iframe proxy
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'X-Frame-Options',
+            value: 'SAMEORIGIN',
+          },
+        ],
+      },
+    ]
   },
 }
 
